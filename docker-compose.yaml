@@ -1,0 +1,77 @@
+version: '3.9'
+
+services:
+  fastapi:
+    container_name: fastapi-app
+    build: ./FastAPI
+    ports:
+      - "8000:8000"
+    networks:
+      - default
+
+  api:
+    extends:
+      file: ./dify/docker/docker-compose.yaml
+      service: api
+    ports:
+      - "5001:5001"
+
+  plugin_daemon:
+    extends:
+      file: ./dify/docker/docker-compose.yaml
+      # ↓ 元のファイルでのサービス名が 'plugin_daemon' であることを確認
+      service: plugin_daemon
+
+  nginx:
+    extends:
+      file: ./dify/docker/docker-compose.yaml
+      service: nginx
+    ports:
+      - '${EXPOSE_NGINX_PORT:-80}:${NGINX_PORT:-80}'
+      - '${EXPOSE_NGINX_SSL_PORT:-443}:${NGINX_SSL_PORT:-443}'
+    depends_on:
+      - api
+      - web
+
+  web:
+    extends:
+      file: ./dify/docker/docker-compose.yaml
+      service: web
+    ports:
+      - "3000:3000"
+
+  worker:
+    extends:
+      file: ./dify/docker/docker-compose.yaml
+      service: worker
+  db:
+    extends:
+      file: ./dify/docker/docker-compose.yaml
+      service: db
+
+  redis:
+    extends:
+      file: ./dify/docker/docker-compose.yaml
+      service: redis
+
+  weaviate:
+    extends:
+      file: ./dify/docker/docker-compose.yaml
+      service: weaviate
+    ports:
+      - "8080:8080"
+
+  sandbox: # sandbox サービスを追加 (Difyの機能を使う場合)
+    extends:
+      file: ./dify/docker/docker-compose.yaml
+      service: sandbox
+  ssrf_proxy:
+    extends:
+      file: ./dify/docker/docker-compose.yaml
+      service: ssrf_proxy
+
+networks:
+
+  ssrf_proxy_network:  # ←追加（元の設定に合わせる）
+    driver: bridge
+    internal: true

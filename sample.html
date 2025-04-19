@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Vue + Vuetify + FastAPI (Dify)</title>
+    <!-- VuetifyのCSSをCDNから読み込む -->
+    <link href="https://cdn.jsdelivr.net/npm/vuetify@3/dist/vuetify.min.css" rel="stylesheet">
+</head>
+
+<body>
+
+    <div id="app">
+        <v-app>
+            <v-main>
+                <v-container class="ma-4">
+                    <v-card>
+                        <v-card-title>Chat with Dify</v-card-title>
+                        <v-card-subtitle>Vue + Vuetify + FastAPI</v-card-subtitle>
+                        <v-card-text>
+
+                            <!-- メッセージ入力欄 -->
+                            <v-text-field v-model="userMessage" label="質問を入力" @keyup.enter="sendMessage"></v-text-field>
+
+                            <!-- 送信ボタン -->
+                            <v-btn color="primary" class="mt-2" @click="sendMessage">送信</v-btn>
+
+                            <!-- チャット履歴表示 -->
+                            <div class="mt-4">
+                                <div v-for="(msg, index) in messages" :key="index" style="margin-bottom: 0.5rem;">
+                                    <strong>{{ msg.author }}:</strong>
+                                    <span>{{ msg.text }}</span>
+                                </div>
+                            </div>
+
+                        </v-card-text>
+                    </v-card>
+                </v-container>
+            </v-main>
+        </v-app>
+    </div>
+
+    <!-- Vue CDN -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <!-- Vuetify CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/vuetify@3/dist/vuetify.min.js"></script>
+    <script>
+        const app = Vue.createApp({
+            data() {
+                return {
+                    userMessage: "",
+                    messages: [{
+                        author: "System",
+                        text: "Difyとチャットができます。",
+                        timestamp: Date.now()
+                    }, ],
+                };
+            },
+            methods: {
+                async sendMessage() {
+                    // 入力が空なら何もしない
+                    if (!this.userMessage) return;
+
+                    // まずはユーザーが送信したメッセージをチャット履歴に追加
+                    this.messages.push({
+                        author: "You",
+                        text: this.userMessage,
+                        timestamp: Date.now(),
+                    });
+
+                    // APIに送るJSONペイロード (FastAPI側に合わせて必要項目を送る)
+                    const payload = {
+                        query: this.userMessage,
+                        inputs: {},
+                        conversation_id: "",
+                        user: "abc-123", // 適当なユーザーID
+                        files: [],
+                        // response_mode: "blocking", // FastAPI側ですでに上書きしているなら必須ではない
+                    };
+
+                    let responseText = "";
+
+                    try {
+                        // FastAPI エンドポイントへ POST
+                        const res = await fetch("http://localhost:8000/send-chat-message", {
+                            method: "POST",
+                            headers: {
+                                "Content-Type": "application/json"
+                            },
+                            body: JSON.stringify(payload)
+                        });
+
+                        if (!res.ok) {
+                            // ステータスコード4xx/5xxの場合
+                            throw new Error(`Server returned status ${res.status}`);
+                        }
+
+                        // FastAPIは json_data.get("answer") を return
+                        // → レスポンスが {"answer": "..."} ではなく 単純な文字列の場合もあるので分岐処理
+                        const data = await res.json();
+                        if (typeof data === "string") {
+                            // FastAPI側が return json_data.get("answer") のみ → 単なる文字列
+                            responseText = data;
+                        } else if (data.answer) {
+                            // もし {"answer":"..."} の形式ならこうなる
+                            responseText = data.answer;
+                        } else {
+                            // それ以外の構造を返すなら確認用にJSON文字列化
+                            responseText = JSON.stringify(data);
+                        }
+
+                    } catch (err) {
+                        responseText = "エラー: " + err.message;
+                    }
+
+                    // AI(=Dify)からの応答を追加
+                    this.messages.push({
+                        author: "Dify",
+                        text: responseText,
+                        timestamp: Date.now(),
+                    });
+
+                    // 入力欄クリア
+                    this.userMessage = "";
+                },
+            },
+        });
+
+        // Vuetifyプラグインを利用
+        const vuetify = Vuetify.createVuetify();
+        app.use(vuetify);
+
+        // アプリをマウント
+        app.mount("#app");
+    </script>
+
+</body>
+
+</html>
