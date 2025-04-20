@@ -22,6 +22,13 @@ app.add_middleware(
 API_KEY = "app-A6hVkMjZ6oLQcKuOjvP09Y6N"  # 必要に応じて環境変数などを利用して安全に管理してください
 
 
+@app.get("/slack-test")
+def slack_test():
+    """
+    Slack からのリクエストを受け取るためのエンドポイント
+    """
+    return {"message": "Slack test endpoint"}
+
 @app.get("/debug-chat-message")
 def debug_chat_message():
     """
