@@ -13,7 +13,7 @@ origins = [
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,          # or ["*"] で全許可
+    allow_origins=["*"],          # or ["*"] で全許可
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"]
@@ -27,7 +27,8 @@ def slack_test():
     """
     Slack からのリクエストを受け取るためのエンドポイント
     """
-    return {"message": "Slack test endpoint"}
+    return {"message": "Slack test endpoiddddnt"}
+
 
 @app.get("/debug-chat-message")
 def debug_chat_message():
