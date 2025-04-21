@@ -19,7 +19,7 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
-API_KEY = "app-A6hVkMjZ6oLQcKuOjvP09Y6N"  # 必要に応じて環境変数などを利用して安全に管理してください
+API_KEY = ""  # 必要に応じて環境変数などを利用して安全に管理してください
 
 
 @app.get("/slack-test")
