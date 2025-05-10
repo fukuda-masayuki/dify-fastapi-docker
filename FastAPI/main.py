@@ -1,9 +1,17 @@
-from fastapi import FastAPI, Body
+from fastapi import FastAPI, Body,Request, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.responses import JSONResponse
 import requests
+import configparser
+import time
+import hmac
+import hashlib
+import logging
 
 app = FastAPI()
-
+# ConfigParserオブジェクトを生成
+config = configparser.ConfigParser()
+config.read("config.ini", encoding="utf-8")
 
 # フロントエンドのURLをリストで指定
 origins = [
@@ -19,7 +27,77 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
-API_KEY = ""  # 必要に応じて環境変数などを利用して安全に管理してください
+API_KEY = config['Dify']['key']  # 必要に応じて環境変数などを利用して安全に管理してください
+SLACK_SIGNING_SECRET = config['Dify']['key']
+
+def verify_slack_signature(
+    timestamp: str,
+    signature: str,
+    body: bytes,
+    signing_secret: str,
+    tolerance_sec: int = 60 * 5,  # 5 分以内のみ許可
+) -> bool:
+    """
+    X‑Slack‑Request‑Timestamp と X‑Slack‑Signature を使って
+    リクエストが正当かどうかを検証する。
+    """
+    # リプレイ攻撃対策：古いリクエストは拒否
+    if abs(time.time() - int(timestamp)) > tolerance_sec:
+        return False
+
+    basestring = f"v0:{timestamp}:{body.decode()}".encode()
+    my_signature = (
+        "v0="
+        + hmac.new(signing_secret.encode(), basestring, hashlib.sha256).hexdigest()
+    )
+
+    # 署名を安全に比較
+    return hmac.compare_digest(my_signature, signature)
+
+@app.post("/slack/events")
+async def slack_events(
+    request: Request,
+    x_slack_signature: str = Header(..., alias="X-Slack-Signature"),
+    x_slack_request_timestamp: str = Header(..., alias="X-Slack-Request-Timestamp"),
+):
+    """
+    Slack Events API 受信エンドポイント
+
+    1. 署名を検証して正当性を確認
+    2. url_verification の `challenge` に応答
+    3. 必要なイベントを処理
+    """
+    if not SLACK_SIGNING_SECRET:
+        logging.error("環境変数 SLACK_SIGNING_SECRET が未設定です。")
+        raise HTTPException(status_code=500, detail="Signing secret not configured")
+
+    body = await request.body()
+
+    # 署名チェック
+    if not verify_slack_signature(
+        x_slack_request_timestamp,
+        x_slack_signature,
+        body,
+        SLACK_SIGNING_SECRET,
+    ):
+        raise HTTPException(status_code=401, detail="Invalid Slack signature")
+
+    payload = await request.json()
+
+    # --- ② URL Verification フロー ---
+    if payload.get("type") == "url_verification":
+        return JSONResponse({"challenge": payload["challenge"]})
+
+    # --- ③ イベント処理例（必要に応じて実装） ---
+    event = payload.get("event", {})
+    if event.get("type") == "app_mention":
+        user = event.get("user")
+        text = event.get("text", "")
+        logging.info(f"メンション: {user=} {text=}")
+        # ここで Slack Web API を呼び出して返信しても良い
+
+    # Slack には JSON で OK を返す
+    return JSONResponse({"ok": True})
 
 
 @app.get("/slack-test")
@@ -27,7 +105,24 @@ def slack_test():
     """
     Slack からのリクエストを受け取るためのエンドポイント
     """
-    return {"message": "Slack test endpoiddddnt"}
+    
+    test_data = {
+        "inputs": {},
+        "query": "iPhone 13 Pro Maxの仕様は何ですか？",
+        "response_mode": "blocking",
+        "conversation_id": "",
+        "user": "abc-123",
+        "files": []
+    }
+
+    # 同じアプリのPOSTエンドポイントへアクセス
+    url = "http://localhost:8000/send-chat-message"
+    try:
+        response = requests.post(url, json=test_data)
+        response.raise_for_status()  # 4xx/5xxで例外
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        return {"error": str(e)}
 
 
 @app.get("/debug-chat-message")

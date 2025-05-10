@@ -1,2 +1,3 @@
 .env
 FastAPI/__pycache__
+FastAPI/config.ini

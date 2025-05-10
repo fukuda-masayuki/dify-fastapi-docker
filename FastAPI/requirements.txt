@@ -1,3 +1,5 @@
 fastapi
 uvicorn[standard]
+slack_sdk
+python-dotenv
 requests
