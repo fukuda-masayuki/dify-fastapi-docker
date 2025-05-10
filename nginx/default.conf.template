@@ -40,6 +40,11 @@ server {
         include proxy.conf;                  # 既存ファイルと同じヘッダ設定
     }
 
+    location /slack/events {
+        proxy_pass http://fastapi:8000;  # ← コンテナ名:ポート
+        include proxy.conf;                  # 既存ファイルと同じヘッダ設定
+    }
+
     location / {
       proxy_pass http://web:3000;
       include proxy.conf;
