@@ -74,6 +74,21 @@ services:
     extends:
       file: ./dify/docker/docker-compose.yaml
       service: ssrf_proxy
+  
+  certbot:
+    extends:
+      file: ./dify/docker/docker-compose.yaml
+      service: certbot
+
+  ngrok:
+    image: ngrok/ngrok:latest          # ← multi‑arch（arm64 も OK）
+    restart: unless-stopped
+    environment:
+      NGROK_AUTHTOKEN: "${NGROK_AUTHTOKEN}"  # ngrok トークンを .env に
+    command: ["http", "fastapi:8000"]  # entrypoint が 'ngrok' なので args だけ書く
+    depends_on:
+      - fastapi
+    
 
 networks:
 

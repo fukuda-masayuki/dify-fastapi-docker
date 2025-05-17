@@ -7,6 +7,8 @@ import time
 import hmac
 import hashlib
 import logging
+from slack_sdk import WebClient
+from slack_sdk.errors import SlackApiError
 
 app = FastAPI()
 # ConfigParserオブジェクトを生成
@@ -28,76 +30,38 @@ app.add_middleware(
 )
 
 API_KEY = config['Dify']['key']  # 必要に応じて環境変数などを利用して安全に管理してください
-SLACK_SIGNING_SECRET = config['Dify']['key']
+SLACK_SIGNING_SECRET = config['Dify']['slack_key']
+BOT_TOKEN = config['Dify']['bot_token']
+BOT_USER_ID = config['Dify']['bot_member']
+MENTION_TOKEN = f"<@{BOT_USER_ID}>"
+client = WebClient(token=BOT_TOKEN)
 
-def verify_slack_signature(
-    timestamp: str,
-    signature: str,
-    body: bytes,
-    signing_secret: str,
-    tolerance_sec: int = 60 * 5,  # 5 分以内のみ許可
-) -> bool:
-    """
-    X‑Slack‑Request‑Timestamp と X‑Slack‑Signature を使って
-    リクエストが正当かどうかを検証する。
-    """
-    # リプレイ攻撃対策：古いリクエストは拒否
-    if abs(time.time() - int(timestamp)) > tolerance_sec:
-        return False
-
-    basestring = f"v0:{timestamp}:{body.decode()}".encode()
-    my_signature = (
-        "v0="
-        + hmac.new(signing_secret.encode(), basestring, hashlib.sha256).hexdigest()
-    )
-
-    # 署名を安全に比較
-    return hmac.compare_digest(my_signature, signature)
+# ──────────────────────────────────────────────
+def verify_slack_request(req: Request, body: bytes):
+    timestamp = req.headers.get("X-Slack-Request-Timestamp", "")
+    sig_basestring = f"v0:{timestamp}:{body.decode()}".encode()
+    my_sig = "v0=" + hmac.new(
+        SLACK_SIGNING_SECRET.encode(), sig_basestring, hashlib.sha256
+    ).hexdigest()
+    slack_sig = req.headers.get("X-Slack-Signature", "")
+    if abs(time.time() - int(timestamp)) > 60 * 5 or not hmac.compare_digest(my_sig, slack_sig):
+        raise HTTPException(status_code=403, detail="Verification failed")
 
 @app.post("/slack/events")
-async def slack_events(
-    request: Request,
-    x_slack_signature: str = Header(..., alias="X-Slack-Signature"),
-    x_slack_request_timestamp: str = Header(..., alias="X-Slack-Request-Timestamp"),
-):
-    """
-    Slack Events API 受信エンドポイント
-
-    1. 署名を検証して正当性を確認
-    2. url_verification の `challenge` に応答
-    3. 必要なイベントを処理
-    """
-    if not SLACK_SIGNING_SECRET:
-        logging.error("環境変数 SLACK_SIGNING_SECRET が未設定です。")
-        raise HTTPException(status_code=500, detail="Signing secret not configured")
-
-    body = await request.body()
-
-    # 署名チェック
-    if not verify_slack_signature(
-        x_slack_request_timestamp,
-        x_slack_signature,
-        body,
-        SLACK_SIGNING_SECRET,
-    ):
-        raise HTTPException(status_code=401, detail="Invalid Slack signature")
-
+async def slack_events(request: Request):
+    raw = await request.body()
+    verify_slack_request(request, raw)
     payload = await request.json()
-
-    # --- ② URL Verification フロー ---
+    # URL verification challenge
     if payload.get("type") == "url_verification":
-        return JSONResponse({"challenge": payload["challenge"]})
+        return {"challenge": payload["challenge"]}
 
-    # --- ③ イベント処理例（必要に応じて実装） ---
+    # イベント処理
     event = payload.get("event", {})
     if event.get("type") == "app_mention":
-        user = event.get("user")
-        text = event.get("text", "")
-        logging.info(f"メンション: {user=} {text=}")
-        # ここで Slack Web API を呼び出して返信しても良い
-
-    # Slack には JSON で OK を返す
-    return JSONResponse({"ok": True})
+        channel = event["channel"]
+        client.chat_postMessage(channel=channel, text="こんにちは :wave:")
+    return {"ok": True}
 
 
 @app.get("/slack-test")
