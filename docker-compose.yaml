@@ -88,8 +88,18 @@ services:
     command: ["http", "fastapi:8000"]  # entrypoint が 'ngrok' なので args だけ書く
     depends_on:
       - fastapi
-    
 
+  dozzle:
+    image: amir20/dozzle:latest
+    environment: 
+      - DOZZLE_ENABLE_ACTIONS=true
+      - DOZZLE_FILTER=status=running
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - "9999:8080"  
+  
+  
 networks:
 
   ssrf_proxy_network:  # ←追加（元の設定に合わせる）

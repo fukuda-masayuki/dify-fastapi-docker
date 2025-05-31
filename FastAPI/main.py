@@ -9,6 +9,8 @@ import hashlib
 import logging
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
+import json
+from fastapi.responses import JSONResponse
 
 app = FastAPI()
 # ConfigParserオブジェクトを生成
@@ -50,18 +52,43 @@ def verify_slack_request(req: Request, body: bytes):
 @app.post("/slack/events")
 async def slack_events(request: Request):
     raw = await request.body()
+
+    # 1) 署名検証（既存関数）
     verify_slack_request(request, raw)
-    payload = await request.json()
-    # URL verification challenge
+
+    # 2) JSON 変換
+    try:
+        payload = await request.json()
+    except Exception:
+        # application/x-www-form-urlencoded の可能性もある
+        form = await request.form()
+        payload = json.loads(form.get("payload", "{}"))
+
+    print(payload)
+
+    # 3) URL 検証 (challenge) は即返す
     if payload.get("type") == "url_verification":
         return {"challenge": payload["challenge"]}
 
-    # イベント処理
+    # app_mention 以外は無視
     event = payload.get("event", {})
-    if event.get("type") == "app_mention":
-        channel = event["channel"]
-        client.chat_postMessage(channel=channel, text="こんにちは :wave:")
+    if event.get("type") != "app_mention":
+        return {"ok": True}
+
+    channel   = event["channel"]
+    user_text = event.get("text", "")
+
+    # --- AI で返信を生成（ここではダミー） ---
+    reply = "tesの返事"
+    # --- Slack へ投稿 ---
+    try:
+        client.chat_postMessage(channel=channel, text=reply, thread_ts=event.get("ts"))
+    except Exception as e:
+        print(f"Slack post error: {e}")
+
+    # Slack は本文を見ないので simple OK を返す
     return {"ok": True}
+
 
 
 @app.get("/slack-test")
