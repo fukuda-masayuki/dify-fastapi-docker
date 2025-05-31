@@ -23,6 +23,9 @@ services:
       file: ./dify/docker/docker-compose.yaml
       # ↓ 元のファイルでのサービス名が 'plugin_daemon' であることを確認
       service: plugin_daemon
+    volumes:
+      # ここで /home/dify/data をホスト側の匿名/Named ボリュームにマウント
+      - plugin_daemon_data:/home/dify/data
 
   nginx:
     extends:
@@ -105,3 +108,6 @@ networks:
   ssrf_proxy_network:  # ←追加（元の設定に合わせる）
     driver: bridge
     internal: true
+
+volumes:
+  plugin_daemon_data:
