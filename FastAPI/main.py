@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Body,Request, Header, HTTPException
+from fastapi import FastAPI, Body,Request, Header, HTTPException,BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import JSONResponse
 import requests
@@ -49,12 +49,23 @@ def verify_slack_request(req: Request, body: bytes):
     if abs(time.time() - int(timestamp)) > 60 * 5 or not hmac.compare_digest(my_sig, slack_sig):
         raise HTTPException(status_code=403, detail="Verification failed")
 
+async def handle_dm(event: dict):
+    # 遅延の大きい処理・API 呼び出しはここで
+    channel = event["channel"]
+    reply   = "tesの返事"
+    await client.chat_postMessage(channel=channel, text=reply,
+                                  thread_ts=event["ts"])
+    
+
 @app.post("/slack/events")
-async def slack_events(request: Request):
+async def slack_events(request: Request, bg: BackgroundTasks):
     raw = await request.body()
 
     # 1) 署名検証（既存関数）
     verify_slack_request(request, raw)
+
+    if request.headers.get("X-Slack-Retry-Num"):
+        return {"ok": True}
 
     # 2) JSON 変換
     try:
@@ -64,30 +75,80 @@ async def slack_events(request: Request):
         form = await request.form()
         payload = json.loads(form.get("payload", "{}"))
 
-    print(payload)
-
     # 3) URL 検証 (challenge) は即返す
     if payload.get("type") == "url_verification":
         return {"challenge": payload["challenge"]}
 
-    # app_mention 以外は無視
+    payload = await request.json()
+    if payload.get("type") == "url_verification":
+        return {"challenge": payload["challenge"]}
+
     event = payload.get("event", {})
-    if event.get("type") != "app_mention":
+    if (event.get("type") != "message" or
+        event.get("channel_type") != "im" or
+        event.get("subtype") == "bot_message" or
+        "bot_id" in event):
         return {"ok": True}
+    
+    client.chat_postMessage(channel= event["channel"], text="問い合わせありがとう！！ 少し待ってね！",
+                                  thread_ts=event["ts"])
 
-    channel   = event["channel"]
-    user_text = event.get("text", "")
-
-    # --- AI で返信を生成（ここではダミー） ---
-    reply = "tesの返事"
-    # --- Slack へ投稿 ---
-    try:
-        client.chat_postMessage(channel=channel, text=reply, thread_ts=event.get("ts"))
-    except Exception as e:
-        print(f"Slack post error: {e}")
-
-    # Slack は本文を見ないので simple OK を返す
+    # event_id で 2 重処理防止
+    # bg.add_task(dify_messsage,handle_dm, event)   # 非同期で実行
+    bg.add_task(dify_messsage,payload, event)   # 非同期で実行
     return {"ok": True}
+
+async def dify_messsage(payload: dict,event: dict):
+    print(payload.get("event", {}).get("text", {}))
+    dify_data = {
+        "inputs": payload.get("inputs", {}),
+        "query": payload.get("event", {}).get("text", {}),
+        "response_mode": payload.get("response_mode", "streaming"),
+        "conversation_id": payload.get("conversation_id", ""),
+        "user": payload.get("user", "AAA"),
+        "files": payload.get("files", []),
+        "response_mode": "blocking",
+    }
+
+    dify_headers = {
+        "Authorization": f"Bearer {API_KEY}",
+        "Content-Type": "application/json"
+    }
+
+    # Dify 側のエンドポイント (本来は https://xxx.dify.ai/v1/chat-messages など)
+    dify_url = "http://api:5001/v1/chat-messages"
+
+    print(dify_data)
+
+    try:
+        print("difyにリクエスト")
+        response = requests.post(dify_url, headers=dify_headers, json=dify_data)
+        # ここで本当にJSON形式かどうかを確認する
+        json_data = response.json()
+    except requests.exceptions.RequestException as e:
+        # まずはステータスコードとレスポンスボディをログに出力
+        print("Status Code:", response.status_code if 'response' in locals() else None)
+        print("Response Text:", response.text if 'response' in locals() else None)
+        return {"error": "Request to Dify failed", "detail": str(e)}
+    except ValueError as e:
+        # JSON デコードエラー等
+        print("Status Code:", response.status_code if 'response' in locals() else None)
+        print("Response Text:", response.text if 'response' in locals() else None)
+        return {"error": "Failed to parse JSON", "detail": str(e)}
+    
+    print("Dify response:", json_data)  # デバッグ用ログ
+    # 遅延の大きい処理・API 呼び出しはここで
+    reply   = json_data.get("answer")
+    # ---------- 2. Slack へ返信 ----------
+    kwargs = dict(channel=event["channel"], text=reply)
+    if event.get("channel_type") != "im":        # DM 以外ならスレッド可
+        kwargs["thread_ts"] = event.get("ts")
+
+    try:
+        await client.chat_postMessage(channel=event["channel"], text=reply,
+                                  thread_ts=event["ts"])  # AsyncWebClient なので await OK
+    except Exception as e:
+        print("Slack post error:", e)
 
 
 
@@ -140,6 +201,8 @@ def debug_chat_message():
         return response.json()
     except requests.exceptions.RequestException as e:
         return {"error": str(e)}
+
+
 
 
 @app.post("/send-chat-message")
