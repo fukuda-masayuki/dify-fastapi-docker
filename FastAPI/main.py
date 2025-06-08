@@ -11,6 +11,8 @@ from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 import json
 from fastapi.responses import JSONResponse
+import re
+
 
 app = FastAPI()
 # ConfigParserオブジェクトを生成
@@ -55,7 +57,10 @@ async def handle_dm(event: dict):
     reply   = "tesの返事"
     await client.chat_postMessage(channel=channel, text=reply,
                                   thread_ts=event["ts"])
-    
+
+def to_slack_bold(text: str) -> str:
+    # **bold** → *bold* へ変換
+    return re.sub(r"\*\*(.+?)\*\*", r"*\1*", text) 
 
 @app.post("/slack/events")
 async def slack_events(request: Request, bg: BackgroundTasks):
@@ -99,7 +104,6 @@ async def slack_events(request: Request, bg: BackgroundTasks):
     return {"ok": True}
 
 async def dify_messsage(payload: dict,event: dict):
-    print(payload.get("event", {}).get("text", {}))
     dify_data = {
         "inputs": payload.get("inputs", {}),
         "query": payload.get("event", {}).get("text", {}),
@@ -118,10 +122,8 @@ async def dify_messsage(payload: dict,event: dict):
     # Dify 側のエンドポイント (本来は https://xxx.dify.ai/v1/chat-messages など)
     dify_url = "http://api:5001/v1/chat-messages"
 
-    print(dify_data)
 
     try:
-        print("difyにリクエスト")
         response = requests.post(dify_url, headers=dify_headers, json=dify_data)
         # ここで本当にJSON形式かどうかを確認する
         json_data = response.json()
@@ -136,9 +138,9 @@ async def dify_messsage(payload: dict,event: dict):
         print("Response Text:", response.text if 'response' in locals() else None)
         return {"error": "Failed to parse JSON", "detail": str(e)}
     
-    print("Dify response:", json_data)  # デバッグ用ログ
     # 遅延の大きい処理・API 呼び出しはここで
     reply   = json_data.get("answer")
+    reply = to_slack_bold(reply)
     # ---------- 2. Slack へ返信 ----------
     kwargs = dict(channel=event["channel"], text=reply)
     if event.get("channel_type") != "im":        # DM 以外ならスレッド可
